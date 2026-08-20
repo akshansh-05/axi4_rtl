@@ -1,0 +1,253 @@
+================================================================================
+AXI4 DMA & AXI4 RAM UVM VERIFICATION ENVIRONMENT ARCHITECTURE
+================================================================================
+
+1. HIGH-LEVEL UVM ENVIRONMENT ARCHITECTURE
+--------------------------------------------------------------------------------
+The verification environment is designed to verify:
+1. AXI4 DMA Master Core (axi_dma.v)
+2. AXI4 RAM Slave Core (axi_ram.v)
+3. Full-System Integrated Loopback (axi_dma <-> axi_ram)
+
+The environment (axi_env) consists of 4 specialized Agents, a Virtual Sequencer
+(axi_virtual_sequencer), and a Central Scoreboard (axi_scoreboard).
+
+
++------------------------------------------------------------------------------+
+|                          axi_env (UVM Environment)                           |
+|                                                                              |
+|  +------------------------------------------------------------------------+  |
+|  |                        axi_virtual_sequencer                           |  |
+|  |  (Coordinates scenarios: Descriptor Trigger -> Stream In -> RAM -> Out)|  |
+|  +------------------------------------------------------------------------+  |
+|                                                                              |
+|  +----------------+  +----------------+  +----------------+  +-------------+ |
+|  | dma_desc_agent |  | axis_wr_agent  |  | axis_rd_agent  |  | axi_mm_agent| |
+|  | (Desc Control) |  | (Write Stream) |  | (Read Stream)  |  | (AXI4-MM)   | |
+|  +----------------+  +----------------+  +----------------+  +-------------+ |
+|  | • Sequencer    |  | • Sequencer    |  | • Sequencer    |  | • Sequencer | |
+|  | • Driver       |  | • Driver       |  | • Driver       |  | • Driver    | |
+|  | • Monitor      |  | • Monitor      |  | • Monitor      |  | • Monitor   | |
+|  +-------+--------+  +-------+--------+  +-------+--------+  +------+------+ |
+|          |                   |                   |                  |        |
+|          | (analysis_port)   | (analysis_port)   | (analysis_port)  | (a_port|
+|          v                   v                   v                  v        |
+|  +------------------------------------------------------------------------+  |
+|  |                             axi_scoreboard                             |  |
+|  |  • End-to-End Payload Integrity Check (Stream In == Stream Out)        |  |
+|  |  • Memory Mapping Verification (Stream In == RAM contents == Stream Out|  |
+|  |  • Descriptor Status & Actual Written Length Verification              |  |
+|  +------------------------------------------------------------------------+  |
+|                                                                              |
+|  +------------------------------------------------------------------------+  |
+|  |                         axi_coverage_collector                         |  |
+|  |  • 4KB Boundary Crossings, Burst Sizes, Unaligned Offsets, Error Codes |  |
+|  +------------------------------------------------------------------------+  |
++------------------------------------------------------------------------------+
+
+
+================================================================================
+2. SIGNAL-BY-SIGNAL AGENT SPECIFICATION
+================================================================================
+
+--------------------------------------------------------------------------------
+AGENT 1: dma_desc_agent (DMA Control Plane)
+Interface: dma_desc_if.sv (desc_bus)
+--------------------------------------------------------------------------------
+Role: Acts as the Host CPU programming transfer descriptors into axi_dma.
+
+* DRIVER DRIVES (to DUT):
+  - read_desc_addr[ADDR_WIDTH-1:0]  : Starting memory address for DMA Read
+  - read_desc_len[LEN_WIDTH-1:0]    : Total byte count to read
+  - read_desc_tag[TAG_WIDTH-1:0]    : Read transaction tracking tag
+  - read_desc_id[ID_WIDTH-1:0]      : Stream ID to append to read stream
+  - read_desc_dest[DEST_WIDTH-1:0]  : Stream DEST to append to read stream
+  - read_desc_user[USER_WIDTH-1:0]  : Stream USER sideband to append
+  - read_desc_valid                 : Valid handshake for read descriptor command
+  - write_desc_addr[ADDR_WIDTH-1:0] : Target memory address for DMA Write
+  - write_desc_len[LEN_WIDTH-1:0]   : Max byte count to write
+  - write_desc_tag[TAG_WIDTH-1:0]   : Write transaction tracking tag
+  - write_desc_valid                : Valid handshake for write descriptor command
+  - read_enable                     : Master Read Channel Enable (1=Enable)
+  - write_enable                    : Master Write Channel Enable (1=Enable)
+  - write_abort                     : Emergency abort for active write transfer
+
+* MONITOR SAMPLES (from DUT & Driver):
+  - read_desc_ready                 : DUT acknowledges read descriptor command
+  - read_desc_status_tag            : Tag of completed read descriptor
+  - read_desc_status_error[3:0]     : Error code (0=NONE, 4=SLVERR, 5=DECERR)
+  - read_desc_status_valid          : DUT asserts when read descriptor completes
+  - write_desc_ready                : DUT acknowledges write descriptor command
+  - write_desc_status_len           : Actual byte length written into memory
+  - write_desc_status_tag           : Tag of completed write descriptor
+  - write_desc_status_id            : ID captured from stream write data
+  - write_desc_status_dest          : DEST captured from stream write data
+  - write_desc_status_user          : USER captured from stream write data
+  - write_desc_status_error[3:0]    : Error code (0=NONE, 6=SLVERR, 7=DECERR)
+  - write_desc_status_valid         : DUT asserts when write descriptor completes
+
+--------------------------------------------------------------------------------
+AGENT 2: axis_wr_agent (Write Data Stream Master / Producer)
+Interface: axis_if.sv (axis_wr_bus)
+--------------------------------------------------------------------------------
+Role: Generates and streams payload data into axi_dma (s_axis_write_data_*).
+
+* DRIVER DRIVES (to DUT):
+  - tdata[DATA_WIDTH-1:0]           : Write payload byte slice
+  - tkeep[KEEP_WIDTH-1:0]           : Byte qualify mask (1 bit per byte)
+  - tvalid                          : Write stream data valid handshake
+  - tlast                           : Packet boundary indicator (last beat)
+  - tid[ID_WIDTH-1:0]               : Stream transaction ID tag
+  - tdest[DEST_WIDTH-1:0]           : Stream routing destination
+  - tuser[USER_WIDTH-1:0]           : Custom user sideband payload
+
+* MONITOR SAMPLES (from DUT & Driver):
+  - All signals above when (tvalid == 1 && tready == 1)
+  - tready                          : Sampled to observe backpressure from DMA
+
+--------------------------------------------------------------------------------
+AGENT 3: axis_rd_agent (Read Data Stream Slave / Consumer)
+Interface: axis_if.sv (axis_rd_bus)
+--------------------------------------------------------------------------------
+Role: Receives data read from memory by axi_dma (m_axis_read_data_*).
+
+* DRIVER DRIVES (to DUT):
+  - tready                          : Consumer Ready signal (controls backpressure:
+                                      zero-delay, random stall, long stalls)
+
+* MONITOR SAMPLES (from DUT & Driver):
+  - tdata[DATA_WIDTH-1:0]           : Output data read from memory
+  - tkeep[KEEP_WIDTH-1:0]           : Output byte qualify mask
+  - tvalid                          : DUT asserts when read stream data is valid
+  - tlast                           : DUT asserts on last beat of read packet
+  - tid[ID_WIDTH-1:0]               : Output ID tag
+  - tdest[DEST_WIDTH-1:0]           : Output DEST tag
+  - tuser[USER_WIDTH-1:0]           : Output USER sideband
+
+--------------------------------------------------------------------------------
+AGENT 4: axi_mm_agent (AXI4 Memory-Mapped Bus Agent)
+Interface: axi_if.sv (axi_bus)
+--------------------------------------------------------------------------------
+Role: Polymorphic 5-channel AXI4 agent (AW, W, B, AR, R).
+
+A. When Configured as SLAVE DRIVER (Verifying DMA Master):
+   * DRIVER DRIVES (to DUT):
+     - awready                      : Ready to accept Write Address
+     - wready                       : Ready to accept Write Data
+     - bid[ID_WIDTH-1:0]            : Write Response ID (matches awid)
+     - bresp[1:0]                   : Write Response (00=OKAY, 10=SLVERR, 11=DECERR)
+     - bvalid                       : Write Response valid
+     - arready                      : Ready to accept Read Address
+     - rid[ID_WIDTH-1:0]            : Read Data ID (matches arid)
+     - rdata[DATA_WIDTH-1:0]        : Read Data payload
+     - rresp[1:0]                   : Read Response (00=OKAY, 10=SLVERR, 11=DECERR)
+     - rlast                        : Last read beat of burst
+     - rvalid                       : Read Data valid
+   * DRIVER SAMPLES (from DUT):
+     - awid, awaddr, awlen, awsize, awburst, awvalid
+     - wdata, wstrb, wlast, wvalid
+     - bready
+     - arid, araddr, arlen, arsize, arburst, arvalid
+     - rready
+
+B. When Configured as MASTER DRIVER (Verifying RAM Slave):
+   * DRIVER DRIVES (to DUT):
+     - awid, awaddr, awlen, awsize, awburst, awvalid
+     - wdata, wstrb, wlast, wvalid
+     - bready
+     - arid, araddr, arlen, arsize, arburst, arvalid
+     - rready
+   * DRIVER SAMPLES (from DUT):
+     - awready, wready, bid, bresp, bvalid
+     - arready, rid, rdata, rresp, rlast, rvalid
+
+C. MONITOR (Active in all modes):
+   * Passively samples all 5 channels on valid handshakes:
+     - AW : (awvalid && awready) -> awid, awaddr, awlen, awsize, awburst
+     - W  : (wvalid && wready)   -> wdata, wstrb, wlast
+     - B  : (bvalid && bready)   -> bid, bresp
+     - AR : (arvalid && arready) -> arid, araddr, arlen, arsize, arburst
+     - R  : (rvalid && rready)   -> rid, rdata, rresp, rlast
+
+
+================================================================================
+3. VERIFICATION MODES SEPARATION (WHAT AGENTS ARE ACTIVE)
+================================================================================
+
+--------------------------------------------------------------------------------
+MODE 1: VERIFYING DMA MASTER (DUT = axi_dma.v)
+--------------------------------------------------------------------------------
+Goal: Fully verify DMA Read/Write engines, descriptor parsing, unaligned byte
+      shifting, 4KB boundary splitting, FIFO flow control, and error handling.
+
++-------------------+----------------+-----------------------------------------+
+| AGENT             | STATUS         | WHAT IT DOES IN THIS MODE               |
++-------------------+----------------+-----------------------------------------+
+| dma_desc_agent    | ACTIVE         | Driver programs Read/Write Descriptors; |
+|                   |                | Monitor captures status outputs.        |
+|                   |                |                                         |
+| axis_wr_agent     | ACTIVE Master  | Driver feeds data payload stream into   |
+|                   |                | DMA s_axis_write_data_* interface.      |
+|                   |                |                                         |
+| axis_rd_agent     | ACTIVE Slave   | Driver drives tready backpressure;      |
+|                   |                | Monitor collects output read stream.    |
+|                   |                |                                         |
+| axi_mm_agent      | ACTIVE Slave   | Driver acts as Memory Slave / Model:    |
+|                   | (Memory Model) | accepts AW/W/AR from DMA, returns B/R,  |
+|                   |                | injects SLVERR/DECERR when tested.      |
++-------------------+----------------+-----------------------------------------+
+
+Dataflow in Mode 1:
+[dma_desc_agent] ---> (Descriptor) ---> [axi_dma] ---> (AXI4-MM) ---> [axi_mm_agent (Slave)]
+[axis_wr_agent]  ---> (Stream In)  ---> [axi_dma]
+[axis_rd_agent]  <--- (Stream Out) <--- [axi_dma]
+
+
+--------------------------------------------------------------------------------
+MODE 2: VERIFYING RAM SLAVE (DUT = axi_ram.v)
+--------------------------------------------------------------------------------
+Goal: Verify RAM read/write addressing, byte strobes (wstrb), burst address
+      incrementing, and pipelined output register mode (PIPELINE_OUTPUT = 0/1).
+
++-------------------+----------------+-----------------------------------------+
+| AGENT             | STATUS         | WHAT IT DOES IN THIS MODE               |
++-------------------+----------------+-----------------------------------------+
+| axi_mm_agent      | ACTIVE Master  | Driver issues randomized AXI4 write/read|
+|                   |                | bursts (AW, W, AR) into axi_ram;        |
+|                   |                | Monitor checks read data matches write. |
+|                   |                |                                         |
+| dma_desc_agent    | INACTIVE       | Not used in standalone RAM verification.|
+|                   |                |                                         |
+| axis_wr_agent     | INACTIVE       | Not used in standalone RAM verification.|
+|                   |                |                                         |
+| axis_rd_agent     | INACTIVE       | Not used in standalone RAM verification.|
++-------------------+----------------+-----------------------------------------+
+
+Dataflow in Mode 2:
+[axi_mm_agent (Master)] <===(AXI4 AW/W/B & AR/R)===> [axi_ram (DUT)]
+
+
+--------------------------------------------------------------------------------
+MODE 3: INTEGRATED SYSTEM LOOPBACK (DUTs = axi_dma.v + axi_ram.v)
+--------------------------------------------------------------------------------
+Goal: End-to-end verification of DMA reading from and writing to actual AXI RAM.
+
++-------------------+----------------+-----------------------------------------+
+| AGENT             | STATUS         | WHAT IT DOES IN THIS MODE               |
++-------------------+----------------+-----------------------------------------+
+| dma_desc_agent    | ACTIVE         | Programs descriptors into DMA.          |
+|                   |                |                                         |
+| axis_wr_agent     | ACTIVE Master  | Streams data payload into DMA.          |
+|                   |                |                                         |
+| axis_rd_agent     | ACTIVE Slave   | Consumes output stream from DMA.        |
+|                   |                |                                         |
+| axi_mm_agent      | PASSIVE        | Driver is OFF. Monitor passively sniffs |
+|                   |                | the AXI bus between axi_dma & axi_ram.  |
++-------------------+----------------+-----------------------------------------+
+
+Dataflow in Mode 3:
+[dma_desc_agent] ---> (Descriptor) ---> [axi_dma] <===(axi_mm_bus)===> [axi_ram]
+[axis_wr_agent]  ---> (Stream In)  ---> [axi_dma]         ^
+[axis_rd_agent]  <--- (Stream Out) <--- [axi_dma]         |
+                                                   [axi_mm_agent (Passive Monitor)]
+================================================================================

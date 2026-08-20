@@ -1,0 +1,146 @@
+================================================================================
+AXI4 RAM Memory Slave Core - IP Core Specification
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+The AXI4 RAM module (axi_ram.v) is a synthesizable, parameterizable single-port
+memory core that implements a complete AXI4 Memory-Mapped Slave interface. It is
+suitable for FPGA Block RAM (BRAM) or ASIC internal memory synthesis.
+
+It features:
+- Independent Read and Write state machines allowing simultaneous read and write
+  transactions.
+- Full byte-enable write strobe (s_axi_wstrb) support.
+- Configurable optional output pipelining register stage for high-frequency
+  timing closure.
+
+
+2. BLOCK DIAGRAM
+--------------------------------------------------------------------------------
+                     +---------------------------------------+
+                     |                axi_ram                |
+                     |                                       |
+    s_axi_aw* (AW) ->|  +---------------------------------+  |
+    s_axi_w*  (W)  ->|  |           Write FSM             |  |
+    s_axi_b*  (B)  <-|  | (IDLE -> BURST -> RESP -> IDLE) |  |
+                     |  +----------------+----------------+  |
+                     |                   |                   |
+                     |                   v                   |
+                     |  +---------------------------------+  |
+                     |  |       Memory Array (mem[])      |  |
+                     |  +----------------+----------------+  |
+                     |                   ^                   |
+                     |                   |                   |
+    s_axi_ar* (AR) ->|  +----------------+----------------+  |
+    s_axi_r*  (R)  <-|  |           Read FSM              |  |
+                     |  |      (IDLE -> BURST -> IDLE)    |  |
+                     |  +---------------------------------+  |
+                     +---------------------------------------+
+
+
+3. FSM ARCHITECTURE & OPERATION
+--------------------------------------------------------------------------------
+
+3.1 Write Channel FSM (write_state_reg)
+- WRITE_STATE_IDLE  (2'd0): Asserts s_axi_awready. When s_axi_awvalid is high,
+  captures write address (awaddr), burst length (awlen), size (awsize), burst
+  type (awburst), and ID (awid). Transitions to WRITE_STATE_BURST.
+- WRITE_STATE_BURST (2'd1): Asserts s_axi_wready. On each valid beat (wvalid &&
+  wready), writes enabled bytes into memory array according to s_axi_wstrb.
+  Increments write address. Decrements burst counter. On terminal beat, transitions
+  to WRITE_STATE_RESP (or returns to IDLE if bready is already asserted).
+- WRITE_STATE_RESP  (2'd2): Asserts s_axi_bvalid and sets s_axi_bid = write_id.
+  Returns s_axi_bresp = 2'b00 (OKAY). When s_axi_bready is asserted, transitions
+  back to WRITE_STATE_IDLE.
+
+3.2 Read Channel FSM (read_state_reg)
+- READ_STATE_IDLE  (1'd0): Asserts s_axi_arready. When s_axi_arvalid is high,
+  captures read address (araddr), burst length (arlen), size (arsize), and ID
+  (arid). Transitions to READ_STATE_BURST.
+- READ_STATE_BURST (1'd1): Reads data word from memory array (mem[read_addr_valid]),
+  asserts s_axi_rvalid, sets s_axi_rdata, sets s_axi_rid = read_id, and asserts
+  s_axi_rlast on the final beat of the burst. Increments read address. When read
+  burst completes, asserts s_axi_arready and transitions back to READ_STATE_IDLE.
+
+
+4. PARAMETERS
+--------------------------------------------------------------------------------
+Parameter          | Default            | Units/Type   | Description
+-------------------|--------------------|--------------|-----------------------------------------------
+DATA_WIDTH         | 32                 | bits         | Width of AXI4 data bus (32, 64, 128, etc.)
+ADDR_WIDTH         | 16                 | bits         | Width of AXI4 address bus
+STRB_WIDTH         | (DATA_WIDTH/8)     | bytes        | Width of write strobe signal
+ID_WIDTH           | 8                  | bits         | Width of transaction ID fields
+PIPELINE_OUTPUT    | 0                  | boolean (0/1)| When 1, adds output pipeline register stage
+
+
+5. SIGNAL INTERFACES
+--------------------------------------------------------------------------------
+
+5.1 Global Signals
+Signal Name   | Dir | Width | Description
+--------------|-----|-------|--------------------------------------------------
+clk           | In  | 1     | System Clock input
+rst           | In  | 1     | Synchronous active-high reset
+
+5.2 Write Address Channel (AW)
+Signal Name   | Dir | Width          | Description
+--------------|-----|----------------|-----------------------------------------
+s_axi_awid    | In  | ID_WIDTH       | Write Address ID tag
+s_axi_awaddr  | In  | ADDR_WIDTH     | Write Address
+s_axi_awlen   | In  | 8              | Burst Length (0-255 beats)
+s_axi_awsize  | In  | 3              | Burst Size (bytes per transfer)
+s_axi_awburst | In  | 2              | Burst Type (FIXED=00, INCR=01, WRAP=10)
+s_axi_awvalid | In  | 1              | Write Address valid
+s_axi_awready | Out | 1              | RAM ready to accept write address
+
+5.3 Write Data Channel (W)
+Signal Name   | Dir | Width          | Description
+--------------|-----|----------------|-----------------------------------------
+s_axi_wdata   | In  | DATA_WIDTH     | Write Data payload
+s_axi_wstrb   | In  | STRB_WIDTH     | Byte-enable write strobes (1 bit per byte)
+s_axi_wlast   | In  | 1              | Write Last beat indicator
+s_axi_wvalid  | In  | 1              | Write Data valid
+s_axi_wready  | Out | 1              | RAM ready to accept write data
+
+5.4 Write Response Channel (B)
+Signal Name   | Dir | Width          | Description
+--------------|-----|----------------|-----------------------------------------
+s_axi_bid     | Out | ID_WIDTH       | Write Response ID (matches s_axi_awid)
+s_axi_bresp   | Out | 2              | Write Response status (always 2'b00 = OKAY)
+s_axi_bvalid  | Out | 1              | Write Response valid
+s_axi_bready  | In  | 1              | Master ready to accept write response
+
+5.5 Read Address Channel (AR)
+Signal Name   | Dir | Width          | Description
+--------------|-----|----------------|-----------------------------------------
+s_axi_arid    | In  | ID_WIDTH       | Read Address ID tag
+s_axi_araddr  | In  | ADDR_WIDTH     | Read Address
+s_axi_arlen   | In  | 8              | Burst Length (0-255 beats)
+s_axi_arsize  | In  | 3              | Burst Size (bytes per transfer)
+s_axi_arburst | In  | 2              | Burst Type (FIXED=00, INCR=01, WRAP=10)
+s_axi_arvalid | In  | 1              | Read Address valid
+s_axi_arready | Out | 1              | RAM ready to accept read address
+
+5.6 Read Data Channel (R)
+Signal Name   | Dir | Width          | Description
+--------------|-----|----------------|-----------------------------------------
+s_axi_rid     | Out | ID_WIDTH       | Read Response ID (matches s_axi_arid)
+s_axi_rdata   | Out | DATA_WIDTH     | Read Data payload
+s_axi_rresp   | Out | 2              | Read Response status (always 2'b00 = OKAY)
+s_axi_rlast   | Out | 1              | Read Last beat indicator
+s_axi_rvalid  | Out | 1              | Read Data valid
+s_axi_rready  | In  | 1              | Master ready to accept read data
+
+
+6. MEMORY ADDRESSING & WORD ALIGNMENT
+--------------------------------------------------------------------------------
+The memory word depth is calculated as:
+  VALID_ADDR_WIDTH = ADDR_WIDTH - $clog2(STRB_WIDTH)
+  Word Count       = 2 ** VALID_ADDR_WIDTH
+
+Byte write enabling:
+  Each byte lane i (0 to STRB_WIDTH-1) of memory word mem[word_addr] is updated
+  if and only if (s_axi_wstrb[i] == 1'b1).
+================================================================================

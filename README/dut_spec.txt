@@ -1,0 +1,184 @@
+================================================================================
+AXI4 DMA Engine & AXI4 RAM Controller IP Cores - DUT Specification
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+This repository contains a high-performance, fully parameterizable RTL
+implementation of an AXI4 Direct Memory Access (DMA) Engine and an AXI4 RAM
+Slave Core, designed in Verilog-2001.
+
+The IP core enables high-throughput data transfers between memory-mapped AXI4
+memory locations and streaming AXI4-Stream interfaces with minimal CPU overhead.
+
+Author & Credits:
+- Author     : Akshansh Chaurasia
+- Supervisor : Dr. Rakesh Palisetty (Guiding Professor)
+- Institution: Shiv Nadar University
+- Department : Department of Electrical Engineering
+- Project    : Minor Project - AXI Verification IP & RTL Cores
+
+
+2. SYSTEM ARCHITECTURE
+--------------------------------------------------------------------------------
+                       +---------------------------------------------------+
+                       |                    AXI4 DMA                       |
+                       |                                                   |
+ [Read Descriptor] --->|  +------------------+     +--------------------+  |---> AXI4-Stream Read Data
+                       |  |   axi_dma_rd     |     |    axi_dma_wr      |  |
+  [Write Descriptor]-->|  |  (MM to Stream)  |     |  (Stream to MM)    |  |<--- AXI4-Stream Write Data
+                       |  +--------+---------+     +---------+----------+  |
+                       +-----------|-------------------------|-------------+
+                                   | AXI4 AR/R               | AXI4 AW/W/B
+                                   v                         v
+                       +---------------------------------------------------+
+                       |                   AXI4 Memory /                   |
+                       |                     axi_ram                       |
+                       +---------------------------------------------------+
+
+
+3. MODULE DESCRIPTIONS
+--------------------------------------------------------------------------------
+
+3.1 axi_dma.v (Top-Level Master DMA)
+The top-level axi_dma module instantiates and connects the independent read
+(axi_dma_rd) and write (axi_dma_wr) DMA channels. It bridges AXI4 Memory-Mapped
+(AXI4 MM) buses and AXI4-Stream (AXIS) interfaces based on incoming descriptor
+commands.
+
+Key Capabilities:
+- Full-duplex simultaneous read and write DMA operations.
+- Configurable descriptor interfaces for specifying transfer source/destination
+  addresses and lengths.
+- Status feedback interfaces returning transaction tags, byte counts, and
+  error codes.
+- Global read/write enable and write-abort controls.
+
+3.2 axi_dma_rd.v (DMA Read Channel)
+The read channel fetches data from an AXI4 memory-mapped memory address space
+(m_axi_ar* / m_axi_r*) and converts it into an AXI4-Stream output
+(m_axis_read_data_*).
+
+Features:
+- Handles burst splitting across AXI max burst length boundaries (AXI_MAX_BURST_LEN).
+- Implements automatic 4KB address boundary crossing detection & splitting.
+- Supports scatter/gather (ENABLE_SG) and unaligned address transfers (ENABLE_UNALIGNED).
+- Generates AXI stream sideband signals (tlast, tkeep, tid, tdest, tuser).
+- Reports descriptor completion status and transaction errors (OKAY, EXOKAY,
+  SLVERR, DECERR).
+
+3.3 axi_dma_wr.v (DMA Write Channel)
+The write channel receives data from an AXI4-Stream input (s_axis_write_data_*)
+and writes it to a target AXI4 memory-mapped address (m_axi_aw* / m_axi_w* / m_axi_b*).
+
+Features:
+- Automated write address and length computation per descriptor.
+- Manages AXI write response channel (bresp, bvalid, bready).
+- Status FIFO tracking for outstanding in-flight write bursts.
+- Supports abort control (write_abort) for emergency stream clearing.
+- Returns write status output including total byte length written
+  (m_axis_write_desc_status_len).
+
+3.4 axi_ram.v (AXI4 Memory Slave)
+A synthesizable single-port/dual-channel AXI4 RAM core suitable for FPGA block
+RAM (BRAM) or ASIC memory synthesis.
+
+Features:
+- Independent Read FSM (READ_STATE_IDLE, READ_STATE_BURST) and Write FSM
+  (WRITE_STATE_IDLE, WRITE_STATE_BURST, WRITE_STATE_RESP).
+- Byte-wise write strobe support (s_axi_wstrb) using conditional byte array writes.
+- Optional output pipelining register (PIPELINE_OUTPUT = 1) for higher clock
+  frequency synthesis.
+- Automatically calculates memory address depth using $clog2.
+
+
+4. PARAMETER SPECIFICATIONS
+--------------------------------------------------------------------------------
+Parameter          | Default              | Units/Type   | Description
+-------------------|----------------------|--------------|---------------------------------------------
+AXI_DATA_WIDTH     | 32                   | bits         | Width of AXI4 data bus (32, 64, 128, etc.)
+AXI_ADDR_WIDTH     | 16                   | bits         | Width of AXI4 address bus
+AXI_STRB_WIDTH     | (AXI_DATA_WIDTH/8)   | bytes        | Width of byte enable strobes
+AXI_ID_WIDTH       | 8                    | bits         | Width of AXI transaction ID fields
+AXI_MAX_BURST_LEN  | 16                   | cycles/beats | Maximum burst length allowed per AXI transfer
+AXIS_DATA_WIDTH    | AXI_DATA_WIDTH       | bits         | Width of AXI-Stream data bus
+LEN_WIDTH          | 20                   | bits         | Width of DMA length field (max 1MB payload)
+TAG_WIDTH          | 8                    | bits         | Width of descriptor tracking tag
+ENABLE_SG          | 0                    | boolean (0/1)| Enable Scatter-Gather multi-descriptor framing
+ENABLE_UNALIGNED   | 0                    | boolean (0/1)| Support unaligned memory address starting points
+PIPELINE_OUTPUT    | 0                    | boolean (0/1)| (axi_ram) Adds pipeline register to RAM read out
+
+
+5. SIGNAL DESCRIPTION
+--------------------------------------------------------------------------------
+
+5.1 Control & Status
+- clk         : System Clock input.
+- rst         : Synchronous active-high reset signal.
+- read_enable : Enables read DMA processing.
+- write_enable: Enables write DMA processing.
+- write_abort : Immediately halts current write descriptor execution.
+
+5.2 Read Descriptor Interface (s_axis_read_desc_*)
+- s_axis_read_desc_addr : Starting memory address for DMA read.
+- s_axis_read_desc_len  : Number of bytes to transfer.
+- s_axis_read_desc_tag  : Identifier tag passed to status output upon completion.
+- s_axis_read_desc_id   : Stream ID to append to read stream data.
+- s_axis_read_desc_dest : Stream DEST to append to read stream data.
+- s_axis_read_desc_user : Stream USER sideband to append to read stream data.
+- s_axis_read_desc_valid: Handshake valid signal from host.
+- s_axis_read_desc_ready: Handshake ready signal from DMA.
+
+5.3 Read Descriptor Status Interface (m_axis_read_desc_status_*)
+- m_axis_read_desc_status_tag  : Identifier tag of completed read descriptor.
+- m_axis_read_desc_status_error: Error status code (0=NONE, 4=SLVERR, 5=DECERR).
+- m_axis_read_desc_status_valid: Asserted when read descriptor completes.
+
+5.4 Write Descriptor Interface (s_axis_write_desc_*)
+- s_axis_write_desc_addr : Target memory address for DMA write.
+- s_axis_write_desc_len  : Maximum bytes to write.
+- s_axis_write_desc_tag  : Identifier tag for write completion tracking.
+- s_axis_write_desc_valid: Handshake valid signal from host.
+- s_axis_write_desc_ready: Handshake ready signal from DMA.
+
+5.5 Write Descriptor Status Interface (m_axis_write_desc_status_*)
+- m_axis_write_desc_status_len  : Actual byte count written to memory.
+- m_axis_write_desc_status_tag  : Tag matching completed write descriptor.
+- m_axis_write_desc_status_id   : Captured stream ID.
+- m_axis_write_desc_status_dest : Captured stream DEST.
+- m_axis_write_desc_status_user : Captured stream USER.
+- m_axis_write_desc_status_error: Error status code (0=NONE, 6=SLVERR, 7=DECERR).
+- m_axis_write_desc_status_valid: Asserted when write descriptor completes.
+
+5.6 AXI-Stream Read Data Output (m_axis_read_data_*)
+- m_axis_read_data_tdata : Read data payload from memory space.
+- m_axis_read_data_tkeep : Byte enable strobe.
+- m_axis_read_data_tvalid: Data valid signal.
+- m_axis_read_data_tready: Downstream consumer ready backpressure.
+- m_axis_read_data_tlast : End of packet boundary.
+- m_axis_read_data_tid   : Stream ID tag.
+- m_axis_read_data_tdest : Stream DEST tag.
+- m_axis_read_data_tuser : Stream USER sideband.
+
+5.7 AXI-Stream Write Data Input (s_axis_write_data_*)
+- s_axis_write_data_tdata : Write data payload to be written to memory.
+- s_axis_write_data_tkeep : Byte enable strobe.
+- s_axis_write_data_tvalid: Data valid signal from stream source.
+- s_axis_write_data_tready: DMA ready signal.
+- s_axis_write_data_tlast : End of packet boundary.
+- s_axis_write_data_tid   : Stream ID tag.
+- s_axis_write_data_tdest : Stream DEST tag.
+- s_axis_write_data_tuser : Stream USER sideband.
+
+5.8 AXI4 Memory-Mapped 5-Channel Bus (m_axi_* / s_axi_*)
+- Write Address Channel (AW) : awid, awaddr, awlen, awsize, awburst, awvalid, awready
+- Write Data Channel (W)    : wdata, wstrb, wlast, wvalid, wready
+- Write Response Channel (B) : bid, bresp, bvalid, bready
+- Read Address Channel (AR)  : arid, araddr, arlen, arsize, arburst, arvalid, arready
+- Read Data Channel (R)      : rid, rdata, rresp, rlast, rvalid, rready
+
+
+6. LICENSE
+--------------------------------------------------------------------------------
+This project is released under the MIT License.
+================================================================================

@@ -1,0 +1,206 @@
+================================================================================
+AXI4 Direct Memory Access (DMA) Engine - IP Core Specification
+================================================================================
+
+1. OVERVIEW
+--------------------------------------------------------------------------------
+The AXI4 DMA Engine is a high-performance, fully parameterizable RTL core
+designed in Verilog-2001. It enables high-throughput data transfers between
+memory-mapped AXI4 memory locations and streaming AXI4-Stream interfaces with
+minimal CPU overhead.
+
+It consists of a top-level wrapper (axi_dma.v) that instantiates two independent
+channels:
+- axi_dma_rd.v : DMA Read Engine  (Memory-Mapped to AXI4-Stream)
+- axi_dma_wr.v : DMA Write Engine (AXI4-Stream to Memory-Mapped)
+
+
+2. BLOCK DIAGRAM
+--------------------------------------------------------------------------------
+                       +---------------------------------------------------+
+                       |                    AXI4 DMA                       |
+                       |                                                   |
+ [Read Descriptor] --->|  +------------------+     +--------------------+  |---> AXI4-Stream Read Data
+                       |  |   axi_dma_rd     |     |    axi_dma_wr      |  |
+  [Write Descriptor]-->|  |  (MM to Stream)  |     |  (Stream to MM)    |  |<--- AXI4-Stream Write Data
+                       |  +--------+---------+     +---------+----------+  |
+                       +-----------|-------------------------|-------------+
+                                   | AXI4 AR/R               | AXI4 AW/W/B
+                                   v                         v
+                                   [AXI4 Memory-Mapped Bus]
+
+
+3. MODULE BREAKDOWN & FEATURES
+--------------------------------------------------------------------------------
+
+3.1 Top-Level Wrapper (axi_dma.v)
+- Full-duplex simultaneous read and write DMA operations.
+- Independent descriptor command interfaces for read and write channels.
+- Status feedback interfaces returning transaction tags, byte counts, and error codes.
+- Global enable controls (read_enable, write_enable) and emergency write abort.
+
+3.2 Read Channel Engine (axi_dma_rd.v)
+- Fetches data from AXI4 memory address space (m_axi_ar* / m_axi_r*) and streams
+  it to m_axis_read_data_*.
+- Automatic 4KB boundary crossing detection & burst splitting.
+- Burst splitting across AXI max burst length boundaries (AXI_MAX_BURST_LEN).
+- Unaligned address support (ENABLE_UNALIGNED): barrel shifts data and handles
+  leading/trailing byte offsets.
+- Internal output FIFO (depth 32) with half-full backpressure flow control.
+- Captures AXI read errors (SLVERR, DECERR) and reports them in descriptor status.
+
+3.3 Write Channel Engine (axi_dma_wr.v)
+- Consumes incoming stream data (s_axis_write_data_*) and writes it to AXI4
+  memory address space (m_axi_aw* / m_axi_w* / m_axi_b*).
+- Automated write address and length computation per descriptor.
+- Generates byte-accurate write strobes (wstrb) for aligned and unaligned bursts.
+- Status tracking FIFO (depth 32) to track outstanding in-flight write bursts.
+- Emergency write abort control (write_abort) with automatic stream clearing.
+- Early stream termination padding: pads remaining burst beats with wstrb=0 if
+  stream asserts tlast prematurely.
+
+
+4. PARAMETERS
+--------------------------------------------------------------------------------
+Parameter          | Default              | Units/Type   | Description
+-------------------|----------------------|--------------|---------------------------------------------
+AXI_DATA_WIDTH     | 32                   | bits         | Width of AXI4 data bus (32, 64, 128, etc.)
+AXI_ADDR_WIDTH     | 16                   | bits         | Width of AXI4 address bus
+AXI_STRB_WIDTH     | (AXI_DATA_WIDTH/8)   | bytes        | Width of byte enable strobes
+AXI_ID_WIDTH       | 8                    | bits         | Width of AXI transaction ID fields
+AXI_MAX_BURST_LEN  | 16                   | cycles/beats | Maximum burst length allowed per AXI transfer
+AXIS_DATA_WIDTH    | AXI_DATA_WIDTH       | bits         | Width of AXI-Stream data bus
+AXIS_KEEP_ENABLE   | (AXIS_DATA_WIDTH>8)  | boolean (0/1)| Enable AXI-Stream tkeep byte qualifier
+AXIS_KEEP_WIDTH    | (AXIS_DATA_WIDTH/8)  | bytes        | Width of tkeep signal
+AXIS_LAST_ENABLE   | 1                    | boolean (0/1)| Enable AXI-Stream tlast packet boundary
+AXIS_ID_ENABLE     | 0                    | boolean (0/1)| Enable AXI-Stream tid signal propagation
+AXIS_ID_WIDTH      | 8                    | bits         | Width of tid signal
+AXIS_DEST_ENABLE   | 0                    | boolean (0/1)| Enable AXI-Stream tdest routing signal
+AXIS_DEST_WIDTH    | 8                    | bits         | Width of tdest signal
+AXIS_USER_ENABLE   | 1                    | boolean (0/1)| Enable AXI-Stream tuser sideband signal
+AXIS_USER_WIDTH    | 1                    | bits         | Width of tuser signal
+LEN_WIDTH          | 20                   | bits         | Width of DMA length field (max 1MB payload)
+TAG_WIDTH          | 8                    | bits         | Width of descriptor tracking tag
+ENABLE_SG          | 0                    | boolean (0/1)| Enable Scatter-Gather multi-descriptor framing
+ENABLE_UNALIGNED   | 0                    | boolean (0/1)| Enable unaligned address/offset transfers
+
+
+5. SIGNAL INTERFACES
+--------------------------------------------------------------------------------
+
+5.1 Global Control
+Signal Name        | Dir | Width | Description
+-------------------|-----|-------|---------------------------------------------
+clk                | In  | 1     | System Clock input
+rst                | In  | 1     | Synchronous active-high reset
+read_enable        | In  | 1     | Enables Read DMA engine processing
+write_enable       | In  | 1     | Enables Write DMA engine processing
+write_abort        | In  | 1     | Aborts current write descriptor execution
+
+5.2 Read Descriptor Command Interface
+Signal Name             | Dir | Width          | Description
+------------------------|-----|----------------|-------------------------------
+s_axis_read_desc_addr   | In  | AXI_ADDR_WIDTH | Source memory address
+s_axis_read_desc_len    | In  | LEN_WIDTH      | Total byte count to read
+s_axis_read_desc_tag    | In  | TAG_WIDTH      | Transaction tag for tracking
+s_axis_read_desc_id     | In  | AXIS_ID_WIDTH  | Stream ID to attach to output
+s_axis_read_desc_dest   | In  | AXIS_DEST_WIDTH| Stream DEST to attach to output
+s_axis_read_desc_user   | In  | AXIS_USER_WIDTH| Stream USER sideband to attach
+s_axis_read_desc_valid  | In  | 1              | Read descriptor valid
+s_axis_read_desc_ready  | Out | 1              | DMA ready to accept descriptor
+
+5.3 Read Descriptor Status Interface
+Signal Name                   | Dir | Width     | Description
+------------------------------|-----|-----------|------------------------------
+m_axis_read_desc_status_tag   | Out | TAG_WIDTH | Tag of completed read transfer
+m_axis_read_desc_status_error | Out | 4         | Error code (0=NONE, 4=SLVERR, 5=DECERR)
+m_axis_read_desc_status_valid | Out | 1         | Status output valid
+
+5.4 Write Descriptor Command Interface
+Signal Name              | Dir | Width          | Description
+-------------------------|-----|----------------|------------------------------
+s_axis_write_desc_addr   | In  | AXI_ADDR_WIDTH | Destination memory address
+s_axis_write_desc_len    | In  | LEN_WIDTH      | Max byte count to write
+s_axis_write_desc_tag    | In  | TAG_WIDTH      | Transaction tag for tracking
+s_axis_write_desc_valid  | In  | 1              | Write descriptor valid
+s_axis_write_desc_ready  | Out | 1              | DMA ready to accept descriptor
+
+5.5 Write Descriptor Status Interface
+Signal Name                    | Dir | Width          | Description
+-------------------------------|-----|----------------|------------------------
+m_axis_write_desc_status_len   | Out | LEN_WIDTH      | Actual bytes written to memory
+m_axis_write_desc_status_tag   | Out | TAG_WIDTH      | Tag of completed write transfer
+m_axis_write_desc_status_id    | Out | AXIS_ID_WIDTH  | Stream ID from write stream
+m_axis_write_desc_status_dest  | Out | AXIS_DEST_WIDTH| Stream DEST from write stream
+m_axis_write_desc_status_user  | Out | AXIS_USER_WIDTH| Stream USER from write stream
+m_axis_write_desc_status_error | Out | 4              | Error code (0=NONE, 6=SLVERR, 7=DECERR)
+m_axis_write_desc_status_valid | Out | 1              | Status output valid
+
+5.6 AXI-Stream Read Data Output Interface
+Signal Name             | Dir | Width           | Description
+------------------------|-----|-----------------|------------------------------
+m_axis_read_data_tdata  | Out | AXIS_DATA_WIDTH | Read data payload
+m_axis_read_data_tkeep  | Out | AXIS_KEEP_WIDTH | Byte strobe mask
+m_axis_read_data_tvalid | Out | 1               | Stream data valid
+m_axis_read_data_tready | In  | 1               | Downstream sink ready
+m_axis_read_data_tlast  | Out | 1               | Packet boundary flag (last beat)
+m_axis_read_data_tid    | Out | AXIS_ID_WIDTH   | Stream ID tag
+m_axis_read_data_tdest  | Out | AXIS_DEST_WIDTH | Stream routing destination
+m_axis_read_data_tuser  | Out | AXIS_USER_WIDTH | Stream user sideband data
+
+5.7 AXI-Stream Write Data Input Interface
+Signal Name             | Dir | Width           | Description
+------------------------|-----|-----------------|------------------------------
+s_axis_write_data_tdata | In  | AXIS_DATA_WIDTH | Write data payload from source
+s_axis_write_data_tkeep | In  | AXIS_KEEP_WIDTH | Byte strobe mask
+s_axis_write_data_tvalid| In  | 1               | Stream data valid
+s_axis_write_data_tready| Out | 1               | DMA ready to receive data
+s_axis_write_data_tlast | In  | 1               | Packet boundary flag (last beat)
+s_axis_write_data_tid   | In  | AXIS_ID_WIDTH   | Stream ID tag
+s_axis_write_data_tdest | In  | AXIS_DEST_WIDTH | Stream routing destination
+s_axis_write_data_tuser | In  | AXIS_USER_WIDTH | Stream user sideband data
+
+5.8 AXI4 Memory-Mapped Master Interface (5 Channels)
+Signal Name   | Dir | Width          | Description
+--------------|-----|----------------|-----------------------------------------
+m_axi_awid    | Out | AXI_ID_WIDTH   | Write Address ID
+m_axi_awaddr  | Out | AXI_ADDR_WIDTH | Write Address
+m_axi_awlen   | Out | 8              | Burst Length (0-255 beats)
+m_axi_awsize  | Out | 3              | Burst Size (bytes per transfer)
+m_axi_awburst | Out | 2              | Burst Type (2'b01 = INCR)
+m_axi_awvalid | Out | 1              | Write Address valid
+m_axi_awready | In  | 1              | Write Address ready
+m_axi_wdata   | Out | AXI_DATA_WIDTH | Write Data payload
+m_axi_wstrb   | Out | AXI_STRB_WIDTH | Write Byte Strobes
+m_axi_wlast   | Out | 1              | Write Last beat indicator
+m_axi_wvalid  | Out | 1              | Write Data valid
+m_axi_wready  | In  | 1              | Write Data ready
+m_axi_bid     | In  | AXI_ID_WIDTH   | Write Response ID
+m_axi_bresp   | In  | 2              | Write Response (00=OKAY, 10=SLVERR, 11=DECERR)
+m_axi_bvalid  | In  | 1              | Write Response valid
+m_axi_bready  | Out | 1              | Write Response ready
+m_axi_arid    | Out | AXI_ID_WIDTH   | Read Address ID
+m_axi_araddr  | Out | AXI_ADDR_WIDTH | Read Address
+m_axi_arlen   | Out | 8              | Burst Length (0-255 beats)
+m_axi_arsize  | Out | 3              | Burst Size (bytes per transfer)
+m_axi_arburst | Out | 2              | Burst Type (2'b01 = INCR)
+m_axi_arvalid | Out | 1              | Read Address valid
+m_axi_arready | In  | 1              | Read Address ready
+m_axi_rid     | In  | AXI_ID_WIDTH   | Read Response ID
+m_axi_rdata   | In  | AXI_DATA_WIDTH | Read Data payload
+m_axi_rresp   | In  | 2              | Read Response (00=OKAY, 10=SLVERR, 11=DECERR)
+m_axi_rlast   | In  | 1              | Read Last beat indicator
+m_axi_rvalid  | In  | 1              | Read Data valid
+m_axi_rready  | Out | 1              | Read Data ready
+
+
+6. ERROR CODES
+--------------------------------------------------------------------------------
+Error Code | Name                    | Description
+-----------|-------------------------|-----------------------------------------
+4'd0       | DMA_ERROR_NONE          | Transfer completed successfully
+4'd4       | DMA_ERROR_AXI_RD_SLVERR | AXI Read returned SLVERR (Slave Error)
+4'd5       | DMA_ERROR_AXI_RD_DECERR | AXI Read returned DECERR (Decode Error)
+4'd6       | DMA_ERROR_AXI_WR_SLVERR | AXI Write returned SLVERR (Slave Error)
+4'd7       | DMA_ERROR_AXI_WR_DECERR | AXI Write returned DECERR (Decode Error)
+================================================================================
