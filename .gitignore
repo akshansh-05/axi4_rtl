@@ -1,0 +1,6 @@
+uvm/
+run_dir/
+README/
+*.log
+*.history
+*.vcd
