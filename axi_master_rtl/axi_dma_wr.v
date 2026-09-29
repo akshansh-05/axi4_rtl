@@ -9,25 +9,26 @@
 //
 // Verification Overview:
 // - Protocol Handshakes:
-//     * Descriptor Channel (s_axis_write_desc_*): Valid/Ready handshake to fetch
+//     -> Descriptor Channel (s_axis_write_desc_*): Valid/Ready handshake to fetch
 //       start address, byte length, and transaction tag.
-//     * Status Channel (m_axis_write_desc_status_*): Single-cycle pulse reporting
+//     -> Status Channel (m_axis_write_desc_status_*): Single-cycle pulse reporting
 //       total transferred bytes, descriptor tag, sideband signals, and error codes.
-//     * Stream Data Slave (s_axis_write_data_*): Receives payload data with TKEEP
+//     -> Stream Data Slave (s_axis_write_data_*): Receives payload data with TKEEP
 //       and TLAST. Throttled via TREADY when downstream AXI or internal FIFOs backpressure.
-//     * AXI4 Master AW/W/B Channels: Generates INCR write bursts, streams write beats
+//     -> AXI4 Master AW/W/B Channels: Generates INCR write bursts, streams write beats
 //       with valid byte strobes, and retires transfers upon receiving B-channel responses.
-// - Protocol Constraints & Corner Cases:,                                                 
-//     * 4KB Boundary Crossing: Automatically splits bursts so no AXI transfer crosses
+
+// - Protocol Constraints & Corner Cases:                                                 
+//     -> 4KB Boundary Crossing: Automatically splits bursts so no AXI transfer crosses
 //       a 4KB page boundary (per ARM AXI4 spec section A3.4.1).
-//     * Burst Slicing: Splits large transfers into bursts of at most AXI_MAX_BURST_LEN beats.
-//     * Address Alignment: When ENABLE_UNALIGNED=1, aligns unaligned byte addresses
+//     -> Burst Slicing: Splits large transfers into bursts of at most AXI_MAX_BURST_LEN beats.
+//     -> Address Alignment: When ENABLE_UNALIGNED=1, aligns unaligned byte addresses
 //       to bus words via an internal barrel shifter and applies appropriate WSTRB masks.
-//     * Early Stream Termination: If stream asserts TLAST before the promised burst completes,
+//     -> Early Stream Termination: If stream asserts TLAST before the promised burst completes,
 //       the engine zero-pads remaining beats (WSTRB=0) to maintain AXI protocol compliance.
-//     * Excess Stream Data: If stream supplies more data than descriptor length, extra beats
+//     -> Excess Stream Data: If stream supplies more data than descriptor length, extra beats
 //       are cleanly drained in STATE_DROP_DATA until TLAST is reached.
-//     * Response Tracking: Uses status_fifo to track in-flight bursts and associate B-channel
+//     -> Response Tracking: Uses status_fifo to track in-flight bursts and associate B-channel
 //       responses (OKAY, SLVERR, DECERR) with the originating descriptor.
 //
 // Language: Verilog 2001
@@ -72,7 +73,7 @@ module axi_dma_wr #
     // Enable support for scatter/gather DMA (not implemented in this core)
     parameter ENABLE_SG = 0,
     // Enable barrel-shifting datapath for unaligned byte start addresses
-    parameter ENABLE_UNALIGNED = 0
+    parameter ENABLE_UNALIGNED = 1
 )
 (
     input  wire                       clk,

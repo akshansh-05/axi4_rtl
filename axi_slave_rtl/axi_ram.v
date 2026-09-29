@@ -19,7 +19,7 @@
 `default_nettype none
 
 /*
- * AXI4 RAM
+ * AXI4 64KB RAM (16-bit address, 32-bit data, 1KB size)
  */
 module axi_ram #
 (
@@ -92,7 +92,6 @@ module axi_ram #
 parameter VALID_ADDR_WIDTH = ADDR_WIDTH - $clog2(STRB_WIDTH);
 parameter WORD_WIDTH = STRB_WIDTH;
 parameter WORD_SIZE = DATA_WIDTH/WORD_WIDTH;
-
 // bus width assertions
 initial begin
     if (WORD_SIZE * STRB_WIDTH != DATA_WIDTH) begin
@@ -281,6 +280,8 @@ always @(posedge clk) begin
     end
 end
 
+// READ - FSM , Combinational Logic between State Transitions
+
 always @* begin
     read_state_next = READ_STATE_IDLE;
 
@@ -289,7 +290,7 @@ always @* begin
     s_axi_rid_next = s_axi_rid_reg;
     s_axi_rlast_next = s_axi_rlast_reg;
     s_axi_rvalid_next = s_axi_rvalid_reg && !(s_axi_rready || (PIPELINE_OUTPUT && !s_axi_rvalid_pipe_reg));
-
+    
     read_id_next = read_id_reg;
     read_addr_next = read_addr_reg;
     read_count_next = read_count_reg;
@@ -337,6 +338,8 @@ always @* begin
         end
     endcase
 end
+
+// READ - FSM , Sequential Logic
 
 always @(posedge clk) begin
     read_state_reg <= read_state_next;

@@ -12,23 +12,23 @@
 //     AXI read transactions decouple address requests from data responses.
 //     This core reflects that with two independent state machines:
 //     1. axi_state FSM (Read Address Generator):
-//        * Accepts read descriptors from s_axis_read_desc_*.
-//        * Slices large transfers into bursts <= AXI_MAX_BURST_LEN.
-//        * Enforces ARM AXI4 4KB page boundary rule (A3.4.1), clipping bursts at 4KB edges.
-//        * Generates AR-channel requests (ARADDR, ARLEN, ARVALID) and pushes transfer
-//          parameters into the internal axis_cmd_* pipeline.
+//        -> Accepts read descriptors from s_axis_read_desc_*.
+//        -> Slices large transfers into bursts <= AXI_MAX_BURST_LEN.
+//        -> Enforces ARM AXI4 4KB page boundary rule (A3.4.1), clipping bursts at 4KB edges.
+//        -> Generates AR-channel requests (ARADDR, ARLEN, ARVALID) and pushes transfer
+//           parameters into the internal axis_cmd_* pipeline.
 //     2. axis_state FSM (Read Data & Stream Output Engine):
-//        * Receives transfer metadata from the axis_cmd_* pipeline.
-//        * Consumes data beats from the AXI R channel (RDATA, RRESP, RLAST).
-//        * Performs byte alignment barrel shifting for unaligned transfers.
-//        * Formats beats into AXI-Stream (TDATA, TKEEP, TLAST).
-//        * Monitors RRESP for SLVERR/DECERR errors and issues a completion pulse
-//          on m_axis_read_desc_status_* upon the final beat.
+//        -> Receives transfer metadata from the axis_cmd_* pipeline.
+//        -> Consumes data beats from the AXI R channel (RDATA, RRESP, RLAST).
+//        -> Performs byte alignment barrel shifting for unaligned transfers.
+//        -> Formats beats into AXI-Stream (TDATA, TKEEP, TLAST).
+//        -> Monitors RRESP for SLVERR/DECERR errors and issues a completion pulse
+//           on m_axis_read_desc_status_* upon the final beat.
 // - Protocol Handshakes:
-//     * Descriptor Input (s_axis_read_desc_*): Valid/Ready handshake.
-//     * Read Status Output (m_axis_read_desc_status_*): 1-cycle valid pulse at packet completion.
-//     * AXI4 AR & R Channels: Issues INCR bursts on AR; consumes RDATA with RREADY backpressure.
-//     * Stream Data Master (m_axis_read_data_*): Driven via a 32-entry skid FIFO buffer.
+//     -> Descriptor Input (s_axis_read_desc_*): Valid/Ready handshake.
+//     -> Read Status Output (m_axis_read_desc_status_*): 1-cycle valid pulse at packet completion.
+//     -> AXI4 AR & R Channels: Issues INCR bursts on AR; consumes RDATA with RREADY backpressure.
+//     -> Stream Data Master (m_axis_read_data_*): Driven via a 32-entry skid FIFO buffer.
 //
 // Language: Verilog 2001
 
@@ -72,7 +72,7 @@ module axi_dma_rd #
     // Enable support for scatter/gather DMA (not implemented in this core)
     parameter ENABLE_SG = 0,
     // Enable barrel-shifting datapath for unaligned byte start addresses
-    parameter ENABLE_UNALIGNED = 0
+    parameter ENABLE_UNALIGNED = 1
 )
 (
     input  wire                       clk,
@@ -298,7 +298,7 @@ assign m_axi_arid    = {AXI_ID_WIDTH{1'b0}};
 assign m_axi_araddr  = m_axi_araddr_reg;
 assign m_axi_arlen   = m_axi_arlen_reg;
 assign m_axi_arsize  = AXI_BURST_SIZE;
-assign m_axi_arburst = 2'b01; // INCR burst type
+assign m_axi_arburst = 2'b01;               // INCR burst type
 assign m_axi_arvalid = m_axi_arvalid_reg;
 assign m_axi_rready  = m_axi_rready_reg;
 

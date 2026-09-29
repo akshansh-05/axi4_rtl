@@ -5,8 +5,8 @@
 // Department:   Department of Electrical Engineering
 // Project:      Minor Project
 // Description:  Top-level AXI4 Direct Memory Access (DMA) engine integrating read
-//               and write channels to transfer data between AXI4 Memory-Mapped
-//               and AXI4-Stream interfaces.
+//               and write channels to transfer data between AXI4-Stream
+//               and AXI4-Memory Mapped interfaces.
 //
 // NOTE ON REMOVED ADVANCED SIGNALS:
 // The unused AXI4 system signals (AWLOCK, AWCACHE, AWPROT, ARLOCK, ARCACHE, ARPROT)
@@ -62,14 +62,14 @@ module axi_dma #
     // (multiple descriptors per AXI stream frame)
     parameter ENABLE_SG = 0,
     // Enable support for unaligned transfers
-    parameter ENABLE_UNALIGNED = 0
+    parameter ENABLE_UNALIGNED = 1
 )
 (
     input  wire                       clk,
     input  wire                       rst,
 
     /*
-     * AXI read descriptor input //done
+     * AXI read descriptor input 
      */
     input  wire [AXI_ADDR_WIDTH-1:0]  s_axis_read_desc_addr,
     input  wire [LEN_WIDTH-1:0]       s_axis_read_desc_len,
@@ -81,7 +81,7 @@ module axi_dma #
     output wire                       s_axis_read_desc_ready,
 
     /*
-     * AXI read descriptor status output // done
+     * AXI read descriptor status output 
      */
     output wire [TAG_WIDTH-1:0]       m_axis_read_desc_status_tag,
     output wire [3:0]                 m_axis_read_desc_status_error,
@@ -169,7 +169,7 @@ module axi_dma #
     output wire [1:0]                 m_axi_arburst, // Burst Type (FIXED, INCR, WRAP)
     output wire                       m_axi_arvalid, // Read Address Valid signal
     input  wire                       m_axi_arready, // Read Address Ready signal
-
+    
     // =========================================================================
     // 5. AXI4 Read Data Channel (R)
     // =========================================================================
