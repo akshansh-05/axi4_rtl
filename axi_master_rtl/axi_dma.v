@@ -71,6 +71,7 @@ module axi_dma #
     /*
      * AXI read descriptor input 
      */
+
     input  wire [AXI_ADDR_WIDTH-1:0]  s_axis_read_desc_addr,
     input  wire [LEN_WIDTH-1:0]       s_axis_read_desc_len,
     input  wire [TAG_WIDTH-1:0]       s_axis_read_desc_tag,
@@ -83,13 +84,37 @@ module axi_dma #
     /*
      * AXI read descriptor status output 
      */
+
     output wire [TAG_WIDTH-1:0]       m_axis_read_desc_status_tag,
     output wire [3:0]                 m_axis_read_desc_status_error,
     output wire                       m_axis_read_desc_status_valid,
 
     /*
-     * AXI stream read data output // done 
+     * AXI write descriptor input
      */
+
+    input  wire [AXI_ADDR_WIDTH-1:0]  s_axis_write_desc_addr,
+    input  wire [LEN_WIDTH-1:0]       s_axis_write_desc_len,
+    input  wire [TAG_WIDTH-1:0]       s_axis_write_desc_tag,
+    input  wire                       s_axis_write_desc_valid,
+    output wire                       s_axis_write_desc_ready,
+
+    /*
+     * AXI write descriptor status output
+     */
+
+    output wire [LEN_WIDTH-1:0]       m_axis_write_desc_status_len,
+    output wire [TAG_WIDTH-1:0]       m_axis_write_desc_status_tag,
+    output wire [AXIS_ID_WIDTH-1:0]   m_axis_write_desc_status_id,
+    output wire [AXIS_DEST_WIDTH-1:0] m_axis_write_desc_status_dest,
+    output wire [AXIS_USER_WIDTH-1:0] m_axis_write_desc_status_user,
+    output wire [3:0]                 m_axis_write_desc_status_error,
+    output wire                       m_axis_write_desc_status_valid,
+
+    /*
+     * AXI stream read data output
+     */
+
     output wire [AXIS_DATA_WIDTH-1:0] m_axis_read_data_tdata,
     output wire [AXIS_KEEP_WIDTH-1:0] m_axis_read_data_tkeep,
     output wire                       m_axis_read_data_tvalid,
@@ -100,28 +125,9 @@ module axi_dma #
     output wire [AXIS_USER_WIDTH-1:0] m_axis_read_data_tuser,
 
     /*
-     * AXI write descriptor input
-     */
-    input  wire [AXI_ADDR_WIDTH-1:0]  s_axis_write_desc_addr,
-    input  wire [LEN_WIDTH-1:0]       s_axis_write_desc_len,
-    input  wire [TAG_WIDTH-1:0]       s_axis_write_desc_tag,
-    input  wire                       s_axis_write_desc_valid,
-    output wire                       s_axis_write_desc_ready,
-
-    /*
-     * AXI write descriptor status output
-     */
-    output wire [LEN_WIDTH-1:0]       m_axis_write_desc_status_len,
-    output wire [TAG_WIDTH-1:0]       m_axis_write_desc_status_tag,
-    output wire [AXIS_ID_WIDTH-1:0]   m_axis_write_desc_status_id,
-    output wire [AXIS_DEST_WIDTH-1:0] m_axis_write_desc_status_dest,
-    output wire [AXIS_USER_WIDTH-1:0] m_axis_write_desc_status_user,
-    output wire [3:0]                 m_axis_write_desc_status_error,
-    output wire                       m_axis_write_desc_status_valid,
-
-    /*
      * AXI stream write data input
      */
+
     input  wire [AXIS_DATA_WIDTH-1:0] s_axis_write_data_tdata,
     input  wire [AXIS_KEEP_WIDTH-1:0] s_axis_write_data_tkeep,
     input  wire                       s_axis_write_data_tvalid,
@@ -131,9 +137,8 @@ module axi_dma #
     input  wire [AXIS_DEST_WIDTH-1:0] s_axis_write_data_tdest,
     input  wire [AXIS_USER_WIDTH-1:0] s_axis_write_data_tuser,
 
-    // =========================================================================
     // 1. AXI4 Write Address Channel (AW)
-    // =========================================================================
+
     output wire [AXI_ID_WIDTH-1:0]    m_axi_awid,    // Write Address ID tag
     output wire [AXI_ADDR_WIDTH-1:0]  m_axi_awaddr,  // Write Address
     output wire [7:0]                 m_axi_awlen,   // Burst Length (number of transfers - 1)
@@ -142,26 +147,23 @@ module axi_dma #
     output wire                       m_axi_awvalid, // Write Address Valid signal
     input  wire                       m_axi_awready, // Write Address Ready signal
 
-    // =========================================================================
     // 2. AXI4 Write Data Channel (W)
-    // =========================================================================
+
     output wire [AXI_DATA_WIDTH-1:0]  m_axi_wdata,   // Write Data payload
     output wire [AXI_STRB_WIDTH-1:0]  m_axi_wstrb,   // Write Byte Strobes (1 bit per byte)
     output wire                       m_axi_wlast,   // Write Last transfer indicator
     output wire                       m_axi_wvalid,  // Write Data Valid signal
     input  wire                       m_axi_wready,  // Write Data Ready signal
 
-    // =========================================================================
     // 3. AXI4 Write Response Channel (B)
-    // =========================================================================
+
     input  wire [AXI_ID_WIDTH-1:0]    m_axi_bid,     // Write Response ID tag (matches AWID)
     input  wire [1:0]                 m_axi_bresp,   // Write Response status (OKAY, EXOKAY, SLVERR, DECERR)
     input  wire                       m_axi_bvalid,  // Write Response Valid signal
     output wire                       m_axi_bready,  // Write Response Ready signal
 
-    // =========================================================================
     // 4. AXI4 Read Address Channel (AR)
-    // =========================================================================
+
     output wire [AXI_ID_WIDTH-1:0]    m_axi_arid,    // Read Address ID tag
     output wire [AXI_ADDR_WIDTH-1:0]  m_axi_araddr,  // Read Address
     output wire [7:0]                 m_axi_arlen,   // Burst Length (number of transfers - 1)
@@ -170,9 +172,8 @@ module axi_dma #
     output wire                       m_axi_arvalid, // Read Address Valid signal
     input  wire                       m_axi_arready, // Read Address Ready signal
     
-    // =========================================================================
     // 5. AXI4 Read Data Channel (R)
-    // =========================================================================
+
     input  wire [AXI_ID_WIDTH-1:0]    m_axi_rid,     // Read Response ID tag (matches ARID)
     input  wire [AXI_DATA_WIDTH-1:0]  m_axi_rdata,   // Read Data payload
     input  wire [1:0]                 m_axi_rresp,   // Read Response status (OKAY, EXOKAY, SLVERR, DECERR)
@@ -181,8 +182,9 @@ module axi_dma #
     output wire                       m_axi_rready,  // Read Data Ready signal
 
     /*
-     * Configuration
+     * Configuration Knobs
      */
+
     input  wire                       read_enable,
     input  wire                       write_enable,
     input  wire                       write_abort
