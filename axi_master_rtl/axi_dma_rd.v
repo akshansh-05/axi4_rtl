@@ -261,9 +261,9 @@ reg [AXIS_USER_WIDTH-1:0] axis_user_reg = {AXIS_USER_WIDTH{1'b0}}, axis_user_nex
 // Port registered outputs
 reg s_axis_read_desc_ready_reg = 1'b0, s_axis_read_desc_ready_next;
 
-reg [TAG_WIDTH-1:0] m_axis_read_desc_status_tag_reg = {TAG_WIDTH{1'b0}}, m_axis_read_desc_status_tag_next;
-reg [3:0] m_axis_read_desc_status_error_reg = 4'd0, m_axis_read_desc_status_error_next;
-reg m_axis_read_desc_status_valid_reg = 1'b0, m_axis_read_desc_status_valid_next;
+reg [TAG_WIDTH-1:0] m_axis_read_desc_status_tag_reg = {TAG_WIDTH{1'b0}};
+reg [3:0]           m_axis_read_desc_status_error_reg = 4'd0;
+reg                 m_axis_read_desc_status_valid_reg = 1'b0;
 
 reg [AXI_ADDR_WIDTH-1:0] m_axi_araddr_reg = {AXI_ADDR_WIDTH{1'b0}}, m_axi_araddr_next;
 reg [7:0] m_axi_arlen_reg = 8'd0, m_axi_arlen_next;
@@ -286,6 +286,8 @@ reg                        m_axis_read_data_tlast_int;
 reg  [AXIS_ID_WIDTH-1:0]   m_axis_read_data_tid_int;
 reg  [AXIS_DEST_WIDTH-1:0] m_axis_read_data_tdest_int;
 reg  [AXIS_USER_WIDTH-1:0] m_axis_read_data_tuser_int;
+reg  [TAG_WIDTH-1:0]       m_axis_read_data_tag_int;
+reg  [3:0]                 m_axis_read_data_error_int;
 
 // Port assignments
 assign s_axis_read_desc_ready = s_axis_read_desc_ready_reg;
@@ -421,10 +423,6 @@ end
 always @* begin
     axis_state_next = AXIS_STATE_IDLE;
 
-    m_axis_read_desc_status_tag_next   = m_axis_read_desc_status_tag_reg;
-    m_axis_read_desc_status_error_next = m_axis_read_desc_status_error_reg;
-    m_axis_read_desc_status_valid_next = 1'b0;
-
     m_axis_read_data_tdata_int  = shift_axi_rdata;
     m_axis_read_data_tkeep_int  = {AXIS_KEEP_WIDTH{1'b1}};
     m_axis_read_data_tlast_int  = 1'b0;
@@ -432,6 +430,14 @@ always @* begin
     m_axis_read_data_tid_int    = axis_id_reg;
     m_axis_read_data_tdest_int  = axis_dest_reg;
     m_axis_read_data_tuser_int  = axis_user_reg;
+    m_axis_read_data_tag_int    = tag_reg;
+    if (rresp_next == AXI_RESP_SLVERR) begin
+        m_axis_read_data_error_int = DMA_ERROR_AXI_RD_SLVERR;
+    end else if (rresp_next == AXI_RESP_DECERR) begin
+        m_axis_read_data_error_int = DMA_ERROR_AXI_RD_DECERR;
+    end else begin
+        m_axis_read_data_error_int = DMA_ERROR_NONE;
+    end
 
     m_axi_rready_next = 1'b0;
 
@@ -536,17 +542,6 @@ always @* begin
                         end
                         m_axis_read_data_tlast_int = 1'b1;
 
-                        // Emit completion status on m_axis_read_desc_status_*
-                        m_axis_read_desc_status_tag_next = tag_reg;
-                        if (rresp_next == AXI_RESP_SLVERR) begin
-                            m_axis_read_desc_status_error_next = DMA_ERROR_AXI_RD_SLVERR;
-                        end else if (rresp_next == AXI_RESP_DECERR) begin
-                            m_axis_read_desc_status_error_next = DMA_ERROR_AXI_RD_DECERR;
-                        end else begin
-                            m_axis_read_desc_status_error_next = DMA_ERROR_NONE;
-                        end
-                        m_axis_read_desc_status_valid_next = 1'b1;
-
                         rresp_next        = AXI_RESP_OKAY; // Reset error status
                         m_axi_rready_next = 1'b0;
                         axis_state_next   = AXIS_STATE_IDLE;
@@ -569,10 +564,6 @@ always @(posedge clk) begin
     axis_state_reg <= axis_state_next;
 
     s_axis_read_desc_ready_reg <= s_axis_read_desc_ready_next;
-
-    m_axis_read_desc_status_tag_reg   <= m_axis_read_desc_status_tag_next;
-    m_axis_read_desc_status_error_reg <= m_axis_read_desc_status_error_next;
-    m_axis_read_desc_status_valid_reg <= m_axis_read_desc_status_valid_next;
 
     m_axi_araddr_reg  <= m_axi_araddr_next;
     m_axi_arlen_reg   <= m_axi_arlen_next;
@@ -642,6 +633,8 @@ reg                       m_axis_read_data_tlast_reg  = 1'b0;
 reg [AXIS_ID_WIDTH-1:0]   m_axis_read_data_tid_reg    = {AXIS_ID_WIDTH{1'b0}};
 reg [AXIS_DEST_WIDTH-1:0] m_axis_read_data_tdest_reg  = {AXIS_DEST_WIDTH{1'b0}};
 reg [AXIS_USER_WIDTH-1:0] m_axis_read_data_tuser_reg  = {AXIS_USER_WIDTH{1'b0}};
+reg [TAG_WIDTH-1:0]       m_axis_read_data_tag_reg    = {TAG_WIDTH{1'b0}};
+reg [3:0]                 m_axis_read_data_error_reg  = 4'd0;
 
 reg [OUTPUT_FIFO_ADDR_WIDTH+1-1:0] out_fifo_wr_ptr_reg = 0;
 reg [OUTPUT_FIFO_ADDR_WIDTH+1-1:0] out_fifo_rd_ptr_reg = 0;
@@ -662,6 +655,10 @@ reg [AXIS_ID_WIDTH-1:0]   out_fifo_tid[2**OUTPUT_FIFO_ADDR_WIDTH-1:0];
 reg [AXIS_DEST_WIDTH-1:0] out_fifo_tdest[2**OUTPUT_FIFO_ADDR_WIDTH-1:0];
 (* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
 reg [AXIS_USER_WIDTH-1:0] out_fifo_tuser[2**OUTPUT_FIFO_ADDR_WIDTH-1:0];
+(* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
+reg [TAG_WIDTH-1:0]       out_fifo_tag[2**OUTPUT_FIFO_ADDR_WIDTH-1:0];
+(* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
+reg [3:0]                 out_fifo_error[2**OUTPUT_FIFO_ADDR_WIDTH-1:0];
 
 assign m_axis_read_data_tready_int = !out_fifo_half_full_reg;
 
@@ -686,6 +683,8 @@ always @(posedge clk) begin
         out_fifo_tid[out_fifo_wr_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]]   <= m_axis_read_data_tid_int;
         out_fifo_tdest[out_fifo_wr_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]] <= m_axis_read_data_tdest_int;
         out_fifo_tuser[out_fifo_wr_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]] <= m_axis_read_data_tuser_int;
+        out_fifo_tag[out_fifo_wr_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]]   <= m_axis_read_data_tag_int;
+        out_fifo_error[out_fifo_wr_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]] <= m_axis_read_data_error_int;
         out_fifo_wr_ptr_reg <= out_fifo_wr_ptr_reg + 1;
     end
 
@@ -698,13 +697,25 @@ always @(posedge clk) begin
         m_axis_read_data_tid_reg    <= out_fifo_tid[out_fifo_rd_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]];
         m_axis_read_data_tdest_reg  <= out_fifo_tdest[out_fifo_rd_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]];
         m_axis_read_data_tuser_reg  <= out_fifo_tuser[out_fifo_rd_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]];
+        m_axis_read_data_tag_reg    <= out_fifo_tag[out_fifo_rd_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]];
+        m_axis_read_data_error_reg  <= out_fifo_error[out_fifo_rd_ptr_reg[OUTPUT_FIFO_ADDR_WIDTH-1:0]];
         out_fifo_rd_ptr_reg <= out_fifo_rd_ptr_reg + 1;
+    end
+
+    // Emit 1-cycle completion status pulse on the next clock cycle after
+    // the final stream beat retires (TVALID && TREADY && TLAST)
+    m_axis_read_desc_status_valid_reg <= 1'b0;
+    if (m_axis_read_data_tvalid_reg && m_axis_read_data_tready && m_axis_read_data_tlast_reg) begin
+        m_axis_read_desc_status_tag_reg   <= m_axis_read_data_tag_reg;
+        m_axis_read_desc_status_error_reg <= m_axis_read_data_error_reg;
+        m_axis_read_desc_status_valid_reg <= 1'b1;
     end
 
     if (rst) begin
         out_fifo_wr_ptr_reg <= 0;
         out_fifo_rd_ptr_reg <= 0;
         m_axis_read_data_tvalid_reg <= 1'b0;
+        m_axis_read_desc_status_valid_reg <= 1'b0;
     end
 end
 
