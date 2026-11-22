@@ -6,9 +6,9 @@ Direct Memory Access (DMA) controllers serve as the primary high-bandwidth bridg
 
 The AMBA AXI4 DMA Subsystem implemented in this project provides a high-throughput, full-duplex, parameterizable bridge between the **AMBA AXI4-Stream Protocol (ARM IHI0051B)** and the **AMBA AXI4-Full Memory-Mapped Protocol (ARM IHI0022H)**.
 
-The top-level hardware module ([`axi_dma.v`](file:///c:/Users/admin/OneDrive/Desktop/axi_vip_project/axi4_rtl/axi_master_rtl/axi_dma.v)) integrates two decoupled, concurrently operating hardware engines:
-1. **MM2S Read Engine ([`axi_dma_rd.v`](file:///c:/Users/admin/OneDrive/Desktop/axi_vip_project/axi4_rtl/axi_master_rtl/axi_dma_rd.v)):** Manages Memory-to-Stream data movements by issuing AXI4 Read Address (AR) bursts, gathering Read Data (R) beats, shifting and packing bytes, and serializing framed packets onto the AXI4-Stream master interface.
-2. **S2MM Write Engine ([`axi_dma_wr.v`](file:///c:/Users/admin/OneDrive/Desktop/axi_vip_project/axi4_rtl/axi_master_rtl/axi_dma_wr.v)):** Manages Stream-to-Memory data movements by capturing AXI4-Stream ingress packets, buffering beats through an internal skid FIFO, aligning bytes via sparse write strobes (`WSTRB`), and committing memory writes via AXI4 Write Address (AW), Write Data (W), and Write Response (B) channels.
+The top-level hardware module (`axi_dma.v`) integrates two decoupled, concurrently operating hardware engines:
+1. **MM2S Read Engine (`axi_dma_rd.v`):** Manages Memory-to-Stream data movements by issuing AXI4 Read Address (AR) bursts, gathering Read Data (R) beats, shifting and packing bytes, and serializing framed packets onto the AXI4-Stream master interface.
+2. **S2MM Write Engine (`axi_dma_wr.v`):** Manages Stream-to-Memory data movements by capturing AXI4-Stream ingress packets, buffering beats through an internal skid FIFO, aligning bytes via sparse write strobes (`WSTRB`), and committing memory writes via AXI4 Write Address (AW), Write Data (W), and Write Response (B) channels.
 
 ```
                            +-------------------------------------------------------+
@@ -49,7 +49,7 @@ The MM2S Read Engine coordinates fetching data words from arbitrary memory addre
 
 ### 2.1 Dual Independent 2-State Finite State Machines
 
-A critical architectural feature of [`axi_dma_rd.v`](file:///c:/Users/admin/OneDrive/Desktop/axi_vip_project/axi4_rtl/axi_master_rtl/axi_dma_rd.v) is the total decoupling of AXI Read Address (`AR`) generation from AXI-Stream Read Data (`R`) consumption. This is accomplished using **two independent 2-state FSMs** communicating via an internal command parameter pipeline:
+A critical architectural feature of `axi_dma_rd.v` is the total decoupling of AXI Read Address (`AR`) generation from AXI-Stream Read Data (`R`) consumption. This is accomplished using **two independent 2-state FSMs** communicating via an internal command parameter pipeline:
 
 ```
 +------------------------------------+         +------------------------------------+
@@ -125,7 +125,7 @@ The S2MM Write Engine coordinates receiving unstructured AXI-Stream beats, segme
 
 ### 3.1 The 5-State Master FSM Architecture
 
-The write datapath is governed by a unified 5-state finite state machine (`state_reg` in [`axi_dma_wr.v`](file:///c:/Users/admin/OneDrive/Desktop/axi_vip_project/axi4_rtl/axi_master_rtl/axi_dma_wr.v)). In addition to nominal streaming, it incorporates dedicated hardware states for early termination and buffer overrun safety:
+The write datapath is governed by a unified 5-state finite state machine (`state_reg` in `axi_dma_wr.v`). In addition to nominal streaming, it incorporates dedicated hardware states for early termination and buffer overrun safety:
 
 ```
                             +--------------------------+
@@ -193,7 +193,7 @@ The write datapath is governed by a unified 5-state finite state machine (`state
 ### 3.2 Microarchitectural Building Blocks in `axi_dma_wr.v`
 
 #### 1. 2-Cycle Distributed RAM Skid Buffer (`out_fifo`)
-Located in [`axi_dma_wr.v` lines 916-965](file:///c:/Users/admin/OneDrive/Desktop/axi_vip_project/axi4_rtl/axi_master_rtl/axi_dma_wr.v#L916-L965), this block isolates the streaming interface from AXI memory backpressure:
+Located in `axi_dma_wr.v` (lines 916-965), this block isolates the streaming interface from AXI memory backpressure:
 * **Storage Array:** Dual-port distributed RAM holding `out_fifo_wdata`, `out_fifo_wstrb`, and `out_fifo_wlast`.
 * **Flow Control Watermarking:** When the difference between write and read pointers reaches $2^{\text{ADDR\_WIDTH}-1}$, `out_fifo_half_full_reg` asserts, throttling upstream stream acceptance.
 * **Pipeline Latency Signature:** Because data is registered on FIFO write and re-registered on FIFO read onto `m_axi_wdata_reg`, handshakes on `s_axis_write_data_*` manifest on the physical memory bus with an exact **2-clock-cycle phase latency**.
